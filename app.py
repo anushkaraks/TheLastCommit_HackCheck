@@ -5,135 +5,66 @@ import operator
 
 app = Flask(__name__)
 
-# 🔥 unified response (VERY IMPORTANT)
 def respond(ans):
-    ans = str(ans).strip()
-    return jsonify({
-        "output": ans,
-        "answer": ans,
-        "result": ans
-    })
+    return jsonify({"output": str(ans).strip()})
 
 @app.route('/v1/answer', methods=['POST'])
 def answer():
-    try:
-        data = request.get_json(silent=True) or {}
-        raw_query = str(data.get("query", "")).strip()
-        query = raw_query.lower()
+    data = request.get_json(silent=True) or {}
+    query = str(data.get("query", "")).strip()
+    q = query.lower()
 
-        # ---------------- NUMBERS ----------------
-        nums = list(map(int, re.findall(r'-?\d+', query)))
+    # ---------------- ENTITY CASE ----------------
+    # Example: Alice scored 80, Bob scored 90
+    pairs = re.findall(r'([A-Z][a-z]*)\s*(?:scored|got|has|=)\s*(\d+)', query)
 
-        # ---------------- ENTITY EXTRACTION ----------------
-        pairs = []
+    if pairs:
+        pairs = [(name, int(score)) for name, score in pairs]
 
-        patterns = [
-            r'([A-Z][a-z]*)\s*(?:scored|got|has|had|=)\s*(\d+)',
-            r'([A-Z][a-z]*)\s*[:\-]\s*(\d+)',
-            r'(\d+)\s*(?:by|for)?\s*([A-Z][a-z]*)',
-            r'([A-Z][a-z]*)\s+(\d+)'
-        ]
+        if "highest" in q or "max" in q or "top" in q:
+            return respond(max(pairs, key=lambda x: x[1])[0])
 
-        for pat in patterns:
-            matches = re.findall(pat, raw_query)
-            for m in matches:
-                if m[0].isdigit():
-                    score, name = m
-                else:
-                    name, score = m
-                pairs.append((name.strip(), int(score)))
+        if "lowest" in q or "min" in q:
+            return respond(min(pairs, key=lambda x: x[1])[0])
 
-        # remove duplicates
-        d = {}
-        for n, s in pairs:
-            d[n] = s
-        pairs = list(d.items())
+    # ---------------- NUMERIC CASE ----------------
+    nums = list(map(int, re.findall(r'-?\d+', q)))
 
-        # ---------------- ENTITY LOGIC ----------------
-        if pairs:
-            pairs.sort(key=lambda x: x[1])
-            scores = [s for _, s in pairs]
+    if not nums:
+        return respond("I cannot solve this.")
 
-            if re.search(r'(highest|top|max|greater|more|best)', query):
-                return respond(pairs[-1][0])
+    # ADDITION
+    if any(w in q for w in ["add", "sum", "plus", "+"]):
+        return respond(f"The sum is {sum(nums)}.")
 
-            if re.search(r'(lowest|min|least|less)', query):
-                return respond(pairs[0][0])
+    # SUBTRACTION
+    if any(w in q for w in ["subtract", "minus", "-"]):
+        if "from" in q and len(nums) >= 2:
+            result = nums[1] - nums[0]
+        else:
+            result = nums[0]
+            for n in nums[1:]:
+                result -= n
+        return respond(f"The difference is {result}.")
 
-            if "second" in query and len(pairs) >= 2:
-                return respond(pairs[-2][0])
+    # MULTIPLICATION
+    if any(w in q for w in ["multiply", "product", "*", "x"]):
+        result = reduce(operator.mul, nums, 1)
+        return respond(f"The product is {result}.")
 
-            if "difference" in query:
-                return respond(max(scores) - min(scores))
+    # DIVISION
+    if any(w in q for w in ["divide", "/"]):
+        try:
+            result = nums[0]
+            for n in nums[1:]:
+                result /= n
+            if result.is_integer():
+                result = int(result)
+            return respond(f"The quotient is {result}.")
+        except:
+            return respond("I cannot solve this.")
 
-            if "who" in query:
-                return respond(pairs[-1][0])
-
-        # ---------------- NUMERIC LOGIC ----------------
-        if not nums:
-            return respond("0")
-
-        def has(words):
-            return any(w in query for w in words)
-
-        # direct expressions
-        if "+" in query:
-            return respond(sum(nums))
-
-        if "*" in query:
-            return respond(reduce(operator.mul, nums, 1))
-
-        if "/" in query and len(nums) >= 2 and nums[1] != 0:
-            return respond(nums[0] // nums[1])
-
-        if "-" in query and len(nums) >= 2:
-            return respond(nums[0] - nums[1])
-
-        # advanced patterns
-        if "sum of squares" in query:
-            return respond(sum(x*x for x in nums))
-
-        if "square" in query:
-            return respond(nums[0] ** 2)
-
-        if "power" in query or "raised" in query:
-            if len(nums) >= 2:
-                return respond(nums[0] ** nums[1])
-
-        if "difference" in query and len(nums) >= 2:
-            return respond(abs(nums[0] - nums[1]))
-
-        if "sort" in query or "order" in query:
-            return respond(" ".join(map(str, sorted(nums))))
-
-        if "second" in query and len(nums) >= 2:
-            return respond(sorted(nums)[-2])
-
-        # standard operations
-        if has(["sum", "add", "total"]):
-            return respond(sum(nums))
-
-        if has(["count"]):
-            return respond(len(nums))
-
-        if has(["max", "largest", "highest"]):
-            return respond(max(nums))
-
-        if has(["min", "smallest", "lowest"]):
-            return respond(min(nums))
-
-        if has(["average", "mean"]):
-            return respond(sum(nums)//len(nums))
-
-        if has(["product", "multiply"]):
-            return respond(reduce(operator.mul, nums, 1))
-
-        # fallback
-        return respond(sum(nums))
-
-    except Exception as e:
-        # 🔥 NEVER silently fail
-        return respond("0")
+    return respond("I cannot solve this.")
 
 
 if __name__ == '__main__':
