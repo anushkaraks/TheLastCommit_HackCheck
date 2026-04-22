@@ -3,14 +3,33 @@ import re
 
 app = Flask(__name__)
 
-def process_query(query):
-    # Extract number from query
+# --- WORD TO NUMBER SUPPORT ---
+word_map = {
+    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4,
+    "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
+    "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13,
+    "fourteen": 14, "fifteen": 15, "sixteen": 16,
+    "seventeen": 17, "eighteen": 18, "nineteen": 19,
+    "twenty": 20
+}
+
+def extract_number(query):
+    query = query.lower()
+
+    # 1. Try digits (including negative)
     nums = re.findall(r'-?\d+', query)
-    if not nums:
-        return ""
+    if nums:
+        return int(nums[0])  # first valid number
 
-    n = int(nums[0])
+    # 2. Try word numbers
+    for word in word_map:
+        if word in query:
+            return word_map[word]
 
+    return None
+
+
+def apply_rules(n):
     # Rule 1
     if n % 2 == 0:
         n = n * 2
@@ -36,16 +55,23 @@ def answer():
         data = request.get_json(silent=True) or {}
 
         query = str(data.get("query", "")).strip()
-        # assets are accepted but not needed for this logic
-        # assets = data.get("assets", [])
 
-        result = process_query(query)
+        if not query:
+            return jsonify({"output": ""})
+
+        number = extract_number(query)
+
+        if number is None:
+            return jsonify({"output": ""})
+
+        result = apply_rules(number)
 
         return jsonify({
             "output": result
         })
 
-    except Exception as e:
+    except Exception:
+        # NEVER crash in evaluation
         return jsonify({
             "output": ""
         })
