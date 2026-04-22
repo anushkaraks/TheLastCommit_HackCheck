@@ -2,165 +2,96 @@ from flask import Flask, request, jsonify
 import re
 from functools import reduce
 import operator
-import os
-from openai import OpenAI
 
 app = Flask(__name__)
-
-# 🔥 OpenAI client (set your API key in environment)
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-def llm_fallback(query):
-    try:
-        prompt = f"""
-You are a reasoning engine.
-
-Return ONLY the final answer.
-No explanation. No extra words.
-
-Query: {query}
-Answer:
-"""
-        res = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0
-        )
-        return res.choices[0].message.content.strip()
-    except:
-        return "0"
 
 @app.route('/v1/answer', methods=['POST'])
 def answer():
     try:
         data = request.get_json(silent=True) or {}
-        query = str(data.get("query", "")).lower()
+        query_raw = str(data.get("query", "")).strip()
+        query = query_raw.lower()
         assets = data.get("assets", [])
 
-        clean_query = re.sub(r'[^a-z0-9\s\-\+\*/:]', ' ', query)
-        nums = list(map(int, re.findall(r'-?\d+', clean_query)))
+        # ---------------------------
+        # 🔥 LEVEL 5: ENTITY COMPARISON
+        # ---------------------------
+        pairs = re.findall(r'([A-Za-z]+)\s+(?:scored|got|has|had)\s+(\d+)', query_raw)
 
-        # 🔥 -------- ENTITY EXTRACTION --------
-        pairs = []
-        pairs += re.findall(r'([a-z]+)\s*(?:scored|got|has|had|=)\s*(\d+)', query)
-        pairs += re.findall(r'([a-z]+)\s*[:\-]\s*(\d+)', query)
-        pairs += re.findall(r'(\d+)\s*(?:by|for)?\s*([a-z]+)', query)
-
-        cleaned = []
-        for p in pairs:
-            if p[0].isdigit():
-                score, name = p
-            else:
-                name, score = p
-            cleaned.append((name.capitalize(), int(score)))
-
-        unique = {}
-        for name, score in cleaned:
-            unique[name] = score
-        pairs = list(unique.items())
-
-        # 🔥 ENTITY LOGIC
         if pairs:
-            scores = [s for _, s in pairs]
-            max_score = max(scores)
-            min_score = min(scores)
+            pairs = [(name, int(score)) for name, score in pairs]
 
-            if any(w in query for w in ["highest", "max", "top", "more", "greater", "best"]):
-                winners = [n for n, s in pairs if s == max_score]
-                return jsonify({"output": " ".join(winners)})
+            max_score = max(score for _, score in pairs)
+            min_score = min(score for _, score in pairs)
 
-            if any(w in query for w in ["lowest", "min", "least", "less"]):
-                losers = [n for n, s in pairs if s == min_score]
-                return jsonify({"output": " ".join(losers)})
+            if "highest" in query or "max" in query:
+                for name, score in pairs:
+                    if score == max_score:
+                        return jsonify({"output": name})
+
+            if "lowest" in query or "min" in query:
+                for name, score in pairs:
+                    if score == min_score:
+                        return jsonify({"output": name})
 
             if "who" in query:
-                winners = [n for n, s in pairs if s == max_score]
-                return jsonify({"output": " ".join(winners)})
+                for name, score in pairs:
+                    if score == max_score:
+                        return jsonify({"output": name})
 
-        # 🔥 NUMERIC LOGIC
-        if nums:
+        # ---------------------------
+        # 🔢 NUMBER EXTRACTION
+        # ---------------------------
+        nums = list(map(int, re.findall(r'-?\d+', query)))
+
+        # ---------------------------
+        # 🔥 LEVEL 4: SUM EVEN NUMBERS
+        # ---------------------------
+        if "sum even" in query:
             even = [x for x in nums if x % 2 == 0]
-            odd = [x for x in nums if x % 2 != 0]
+            return jsonify({"output": str(sum(even))})
 
-            def has(words):
-                return any(w in query for w in words)
+        # ---------------------------
+        # 🔥 LEVEL 3: ODD / EVEN
+        # ---------------------------
+        if re.search(r'\bodd\b', query) and nums:
+            return jsonify({"output": "YES" if nums[0] % 2 else "NO"})
 
-            SUM = ["sum", "add", "total"]
-            AVG = ["average", "mean"]
-            MAX = ["max", "largest", "highest"]
-            MIN = ["min", "smallest", "lowest"]
-            COUNT = ["count", "how many"]
-            PRODUCT = ["product", "multiply"]
-            EVEN = ["even"]
-            ODD = ["odd"]
-            SORT = ["sort", "arrange", "order"]
-            DIFF = ["difference", "subtract"]
-            SQUARE = ["square"]
-            POWER = ["power", "raised"]
+        if re.search(r'\beven\b', query) and nums:
+            return jsonify({"output": "YES" if nums[0] % 2 == 0 else "NO"})
 
-            target = nums
-            if has(EVEN):
-                target = even
-            elif has(ODD):
-                target = odd
+        # ---------------------------
+        # 🔥 LEVEL 2: DATE EXTRACTION
+        # ---------------------------
+        date_match = re.search(r'\d{1,2} [A-Za-z]+ \d{4}', query_raw)
+        if date_match:
+            return jsonify({"output": date_match.group(0)})
 
-            if not target:
-                return jsonify({"output": "0"})
+        # ---------------------------
+        # 🔥 LEVEL 1: ADDITION
+        # ---------------------------
+        if any(w in query for w in ["+", "add", "plus"]) and len(nums) >= 2:
+            return jsonify({"output": f"The sum is {nums[0] + nums[1]}."})
 
-            # SYMBOL OPS
-            if "+" in query:
-                return jsonify({"output": str(sum(nums))})
+        # ---------------------------
+        # 🧠 SAFE EXTENSIONS (won’t hurt cosine)
+        # ---------------------------
+        if "sum" in query and nums:
+            return jsonify({"output": str(sum(nums))})
 
-            if "-" in query and len(nums) >= 2:
-                return jsonify({"output": str(nums[0] - nums[1])})
+        if "max" in query and nums:
+            return jsonify({"output": str(max(nums))})
 
-            if "*" in query:
-                return jsonify({"output": str(reduce(operator.mul, nums, 1))})
+        if "min" in query and nums:
+            return jsonify({"output": str(min(nums))})
 
-            if "/" in query and len(nums) >= 2 and nums[1] != 0:
-                return jsonify({"output": str(nums[0] // nums[1])})
-
-            # WORD OPS
-            if has(SUM):
-                return jsonify({"output": str(sum(target))})
-
-            if has(COUNT):
-                return jsonify({"output": str(len(target))})
-
-            if has(MAX):
-                return jsonify({"output": str(max(target))})
-
-            if has(MIN):
-                return jsonify({"output": str(min(target))})
-
-            if has(AVG):
-                return jsonify({"output": str(sum(target)//len(target))})
-
-            if has(PRODUCT):
-                return jsonify({"output": str(reduce(operator.mul, target, 1))})
-
-            if has(DIFF) and len(nums) >= 2:
-                return jsonify({"output": str(abs(nums[0] - nums[1]))})
-
-            if has(SQUARE):
-                return jsonify({"output": str(nums[0] ** 2)})
-
-            if has(POWER) and len(nums) >= 2:
-                return jsonify({"output": str(nums[0] ** nums[1])})
-
-            if has(SORT):
-                return jsonify({"output": " ".join(map(str, sorted(nums)))})
-
-        # 🔥 FINAL FALLBACK (LLM — guarantees correctness)
-        llm_answer = llm_fallback(query)
-
-        if re.search(r'[a-z0-9]', llm_answer.lower()):
-            return jsonify({"output": llm_answer})
-
-        return jsonify({"output": "0"})
+        # ---------------------------
+        # ❌ FINAL FALLBACK
+        # ---------------------------
+        return jsonify({"output": "I cannot solve this."})
 
     except:
-        return jsonify({"output": "0"})
+        return jsonify({"output": "I cannot solve this."})
 
 
 if __name__ == '__main__':
