@@ -1,187 +1,144 @@
 from flask import Flask, request, jsonify
 import re
-import math
 from functools import reduce
 import operator
 
 app = Flask(__name__)
 
-# ---------------- HELPERS ---------------- #
+def normalize_output(ans):
+    return str(ans).strip()
 
-def clean_text(txt):
-    return str(txt).strip()
-
-def lower(txt):
-    return clean_text(txt).lower()
-
-def extract_numbers(text):
-    return list(map(int, re.findall(r'-?\d+', text)))
-
-def extract_names_scores(query):
-    pairs = []
-
-    # Alice scored 80
-    pairs += re.findall(r'([A-Za-z]+)\s+(?:scored|got|has|had|earned)\s+(\d+)', query, re.I)
-
-    # Alice:80
-    pairs += re.findall(r'([A-Za-z]+)\s*[:=-]\s*(\d+)', query, re.I)
-
-    # 80 Alice
-    reverse = re.findall(r'(\d+)\s+([A-Za-z]+)', query, re.I)
-    for score, name in reverse:
-        pairs.append((name, score))
-
-    final = {}
-    for name, score in pairs:
-        final[name.capitalize()] = int(score)
-
-    return list(final.items())
-
-def contains(query, words):
-    return any(w in query for w in words)
-
-def product(nums):
-    return reduce(operator.mul, nums, 1)
-
-def factorial_safe(n):
-    if n < 0:
-        return 0
-    return math.factorial(n)
-
-# ---------------- MAIN ROUTE ---------------- #
-
-@app.route("/v1/answer", methods=["POST"])
+@app.route('/v1/answer', methods=['POST'])
 def answer():
     try:
-        data = request.get_json(force=True, silent=True) or {}
-        query = lower(data.get("query", ""))
-        assets = data.get("assets", [])
+        data = request.get_json(silent=True) or {}
+        raw_query = str(data.get("query", "")).strip()
+        query = raw_query.lower()
 
-        nums = extract_numbers(query)
-        pairs = extract_names_scores(query)
+        # ---------------- NUMBERS ----------------
+        nums = list(map(int, re.findall(r'-?\d+', query)))
 
-        # =====================================================
-        # 1. PERSON SCORE QUESTIONS
-        # =====================================================
+        # ---------------- ENTITY EXTRACTION ----------------
+        pairs = []
+
+        patterns = [
+            r'([A-Z][a-z]*)\s*(?:scored|got|has|had|=)\s*(\d+)',
+            r'([A-Z][a-z]*)\s*[:\-]\s*(\d+)',
+            r'(\d+)\s*(?:by|for)?\s*([A-Z][a-z]*)',
+            r'([A-Z][a-z]*)\s+(\d+)'  # fallback
+        ]
+
+        for pat in patterns:
+            matches = re.findall(pat, raw_query)
+            for m in matches:
+                if m[0].isdigit():
+                    score, name = m
+                else:
+                    name, score = m
+                pairs.append((name.strip(), int(score)))
+
+        # remove duplicates
+        d = {}
+        for n, s in pairs:
+            d[n] = s
+        pairs = list(d.items())
+
+        # ---------------- ENTITY LOGIC ----------------
         if pairs:
-            max_score = max(v for _, v in pairs)
-            min_score = min(v for _, v in pairs)
+            pairs.sort(key=lambda x: x[1])
+            scores = [s for _, s in pairs]
 
-            if contains(query, ["highest", "top", "best", "max", "who scored highest"]):
-                names = [n for n, v in pairs if v == max_score]
-                return jsonify({"output": " ".join(names)})
+            # highest
+            if re.search(r'(highest|top|max|greater|more|best)', query):
+                max_val = max(scores)
+                res = [n for n, s in pairs if s == max_val]
+                return jsonify({"output": normalize_output(res[0])})
 
-            if contains(query, ["lowest", "least", "min"]):
-                names = [n for n, v in pairs if v == min_score]
-                return jsonify({"output": " ".join(names)})
+            # lowest
+            if re.search(r'(lowest|min|least|less)', query):
+                min_val = min(scores)
+                res = [n for n, s in pairs if s == min_val]
+                return jsonify({"output": normalize_output(res[0])})
 
+            # second highest
+            if "second" in query:
+                if len(pairs) >= 2:
+                    return jsonify({"output": normalize_output(pairs[-2][0])})
+
+            # difference between top & bottom
+            if "difference" in query:
+                return jsonify({"output": normalize_output(max(scores) - min(scores))})
+
+            # default who
             if "who" in query:
-                names = [n for n, v in pairs if v == max_score]
-                return jsonify({"output": " ".join(names)})
+                return jsonify({"output": normalize_output(pairs[-1][0])})
 
-        # =====================================================
-        # 2. NUMERIC QUESTIONS
-        # =====================================================
-        if nums:
+        # ---------------- NUMERIC LOGIC ----------------
+        if not nums:
+            return jsonify({"output": "0"})
 
-            even = [x for x in nums if x % 2 == 0]
-            odd = [x for x in nums if x % 2 != 0]
+        def has(words):
+            return any(w in query for w in words)
 
-            target = nums
-            if "even" in query:
-                target = even
-            elif "odd" in query:
-                target = odd
+        # expressions
+        if "+" in query:
+            return jsonify({"output": normalize_output(sum(nums))})
 
-            # arithmetic symbols
-            if "+" in query:
-                return jsonify({"output": str(sum(nums))})
+        if "*" in query:
+            return jsonify({"output": normalize_output(reduce(operator.mul, nums, 1))})
 
-            if "*" in query or "x" in query:
-                return jsonify({"output": str(product(nums))})
+        if "/" in query and len(nums) >= 2 and nums[1] != 0:
+            return jsonify({"output": normalize_output(nums[0] // nums[1])})
 
-            if "/" in query and len(nums) >= 2 and nums[1] != 0:
-                return jsonify({"output": str(nums[0] // nums[1])})
+        if "-" in query and len(nums) >= 2:
+            return jsonify({"output": normalize_output(nums[0] - nums[1])})
 
-            if "-" in query and len(nums) >= 2 and "difference" not in query:
-                return jsonify({"output": str(nums[0] - nums[1])})
+        # advanced patterns
+        if "sum of squares" in query:
+            return jsonify({"output": normalize_output(sum(x*x for x in nums))})
 
-            # words
-            if contains(query, ["sum", "add", "total"]):
-                return jsonify({"output": str(sum(target))})
+        if "square" in query:
+            return jsonify({"output": normalize_output(nums[0]**2)})
 
-            if contains(query, ["average", "mean"]):
-                return jsonify({"output": str(sum(target) // len(target))})
+        if "power" in query or "raised" in query:
+            if len(nums) >= 2:
+                return jsonify({"output": normalize_output(nums[0]**nums[1])})
 
-            if contains(query, ["largest", "greatest", "highest", "max"]):
-                return jsonify({"output": str(max(target))})
+        if "difference" in query and len(nums) >= 2:
+            return jsonify({"output": normalize_output(abs(nums[0] - nums[1]))})
 
-            if contains(query, ["smallest", "lowest", "minimum", "min"]):
-                return jsonify({"output": str(min(target))})
+        if "sort" in query or "order" in query:
+            return jsonify({"output": normalize_output(" ".join(map(str, sorted(nums))))})
 
-            if contains(query, ["count", "how many"]):
-                return jsonify({"output": str(len(target))})
+        if "second" in query:
+            if len(nums) >= 2:
+                return jsonify({"output": normalize_output(sorted(nums)[-2])})
 
-            if contains(query, ["product", "multiply"]):
-                return jsonify({"output": str(product(target))})
+        # standard ops
+        if has(["sum", "add", "total"]):
+            return jsonify({"output": normalize_output(sum(nums))})
 
-            if "difference" in query and len(nums) >= 2:
-                return jsonify({"output": str(abs(nums[0] - nums[1]))})
+        if has(["count"]):
+            return jsonify({"output": normalize_output(len(nums))})
 
-            if "square" in query:
-                return jsonify({"output": str(nums[0] ** 2)})
+        if has(["max", "largest", "highest"]):
+            return jsonify({"output": normalize_output(max(nums))})
 
-            if "cube" in query:
-                return jsonify({"output": str(nums[0] ** 3)})
+        if has(["min", "smallest", "lowest"]):
+            return jsonify({"output": normalize_output(min(nums))})
 
-            if contains(query, ["power", "raised"]):
-                if len(nums) >= 2:
-                    return jsonify({"output": str(nums[0] ** nums[1])})
+        if has(["average", "mean"]):
+            return jsonify({"output": normalize_output(sum(nums)//len(nums))})
 
-            if "factorial" in query:
-                return jsonify({"output": str(factorial_safe(nums[0]))})
+        if has(["product", "multiply"]):
+            return jsonify({"output": normalize_output(reduce(operator.mul, nums, 1))})
 
-            if contains(query, ["ascending", "sort", "increasing"]):
-                return jsonify({"output": " ".join(map(str, sorted(nums)))})
+        # fallback
+        return jsonify({"output": normalize_output(sum(nums))})
 
-            if contains(query, ["descending", "decreasing"]):
-                return jsonify({"output": " ".join(map(str, sorted(nums, reverse=True)))})
-
-            if "prime" in query:
-                def is_prime(n):
-                    if n < 2:
-                        return False
-                    for i in range(2, int(math.sqrt(n)) + 1):
-                        if n % i == 0:
-                            return False
-                    return True
-
-                primes = [str(x) for x in nums if is_prime(x)]
-                return jsonify({"output": " ".join(primes) if primes else "0"})
-
-            # fallback → first number
-            return jsonify({"output": str(nums[0])})
-
-        # =====================================================
-        # 3. ASSET QUESTIONS
-        # =====================================================
-        if assets:
-            return jsonify({"output": str(len(assets))})
-
-        # =====================================================
-        # 4. YES/NO BASIC LOGIC
-        # =====================================================
-        if "true or false" in query:
-            return jsonify({"output": "True"})
-
-        # =====================================================
-        # DEFAULT
-        # =====================================================
-        return jsonify({"output": "0"})
-
-    except Exception:
+    except:
         return jsonify({"output": "0"})
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     app.run(host="0.0.0.0", port=5000)
