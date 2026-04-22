@@ -1,7 +1,5 @@
 from flask import Flask, request, jsonify
 import re
-from functools import reduce
-import operator
 
 app = Flask(__name__)
 
@@ -9,35 +7,39 @@ app = Flask(__name__)
 def answer():
     try:
         data = request.get_json(silent=True) or {}
+
         query_raw = str(data.get("query", "")).strip()
         query = query_raw.lower()
         assets = data.get("assets", [])
 
-        # ---------------------------
-        # 🔥 LEVEL 5: ENTITY COMPARISON
-        # ---------------------------
-        pairs = re.findall(r'([A-Za-z]+)\s+(?:scored|got|has|had)\s+(\d+)', query_raw)
+        # Clean punctuation for safer matching
+        clean_query = re.sub(r'[^\w\s\-]', ' ', query_raw)
 
-        if pairs:
+        # ---------------------------
+        # 🔥 LEVEL 5: ENTITY COMPARISON (FIXED)
+        # ---------------------------
+        pairs = re.findall(
+            r'([A-Za-z]+)\s+(?:scored|got|has|had)\s+(-?\d+)',
+            clean_query
+        )
+
+        if pairs and any(w in query for w in ["highest", "max", "top", "best", "who"]):
             pairs = [(name, int(score)) for name, score in pairs]
 
             max_score = max(score for _, score in pairs)
+
+            winners = [name for name, score in pairs if score == max_score]
+
+            return jsonify({"output": " ".join(winners)})
+
+        if pairs and any(w in query for w in ["lowest", "min", "least"]):
+            pairs = [(name, int(score)) for name, score in pairs]
+
             min_score = min(score for _, score in pairs)
 
-            if "highest" in query or "max" in query:
-                for name, score in pairs:
-                    if score == max_score:
-                        return jsonify({"output": name})
+            losers = [name for name, score in pairs if score == min_score]
 
-            if "lowest" in query or "min" in query:
-                for name, score in pairs:
-                    if score == min_score:
-                        return jsonify({"output": name})
-
-            if "who" in query:
-                for name, score in pairs:
-                    if score == max_score:
-                        return jsonify({"output": name})
+            return jsonify({"output": " ".join(losers)})
 
         # ---------------------------
         # 🔢 NUMBER EXTRACTION
@@ -74,7 +76,7 @@ def answer():
             return jsonify({"output": f"The sum is {nums[0] + nums[1]}."})
 
         # ---------------------------
-        # 🧠 SAFE EXTENSIONS (won’t hurt cosine)
+        # 🧠 SAFE FALLBACKS (CONTROLLED)
         # ---------------------------
         if "sum" in query and nums:
             return jsonify({"output": str(sum(nums))})
