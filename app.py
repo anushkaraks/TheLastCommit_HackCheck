@@ -1,7 +1,5 @@
 from flask import Flask, request, jsonify
 import re
-from functools import reduce
-import operator
 
 app = Flask(__name__)
 
@@ -9,94 +7,43 @@ app = Flask(__name__)
 def answer():
     try:
         data = request.get_json(silent=True) or {}
-        query = str(data.get("query", "")).lower()
-        assets = data.get("assets", [])
+        query_raw = str(data.get("query", "")).strip()
+        query = query_raw.lower()
 
-        query = re.sub(r'[^a-z0-9\s\-\+\*/]', ' ', query)
+        # 🔹 LEVEL 5: WHO SCORED HIGHEST
+        matches = re.findall(r'([A-Za-z]+)\s+scored\s+(\d+)', query_raw)
+        if matches and "highest" in query:
+            max_person = max(matches, key=lambda x: int(x[1]))
+            return jsonify({"output": max_person[0]})
 
+        # 🔹 LEVEL 4: SUM EVEN NUMBERS
         nums = list(map(int, re.findall(r'-?\d+', query)))
+        if "sum even" in query:
+            even_nums = [x for x in nums if x % 2 == 0]
+            return jsonify({"output": str(sum(even_nums))})
 
-        if not nums:
-            return jsonify({"output": "0"})
+        # 🔹 LEVEL 3: ODD / EVEN
+        if "odd" in query and nums:
+            return jsonify({"output": "YES" if nums[0] % 2 != 0 else "NO"})
 
-        even = [x for x in nums if x % 2 == 0]
-        odd = [x for x in nums if x % 2 != 0]
+        if "even" in query and nums:
+            return jsonify({"output": "YES" if nums[0] % 2 == 0 else "NO"})
 
-        def has(q, words):
-            return any(w in q for w in words)
+        # 🔹 LEVEL 2: DATE EXTRACTION
+        date_match = re.search(r'\d{1,2} [A-Za-z]+ \d{4}', query_raw)
+        if date_match:
+            return jsonify({"output": date_match.group(0)})
 
-        SUM = ["sum", "add", "total"]
-        AVG = ["average", "mean"]
-        MAX = ["max", "largest", "highest"]
-        MIN = ["min", "smallest", "lowest"]
-        COUNT = ["count", "how many"]
-        PRODUCT = ["product", "multiply"]
-        EVEN = ["even"]
-        ODD = ["odd"]
-        SORT = ["sort", "arrange", "order"]
-        DIFF = ["difference", "subtract"]
-        SQUARE = ["square"]
-        
-        target = nums
-        if has(query, EVEN):
-            target = even
-        elif has(query, ODD):
-            target = odd
+        # 🔹 LEVEL 1: ADDITION
+        if any(word in query for word in ["+", "add", "plus"]) and len(nums) >= 2:
+            result = nums[0] + nums[1]
+            return jsonify({"output": f"The sum is {result}."})
 
-        if not target:
-            return jsonify({"output": "0"})
-
-        # 🔥 DIRECT SYMBOL OPERATIONS
-        if "+" in query:
-            return jsonify({"output": str(sum(nums))})
-
-        if "-" in query and len(nums) >= 2:
-            return jsonify({"output": str(nums[0] - nums[1])})
-
-        if "*" in query:
-            return jsonify({"output": str(reduce(operator.mul, nums, 1))})
-
-        if "/" in query and len(nums) >= 2 and nums[1] != 0:
-            return jsonify({"output": str(nums[0] // nums[1])})
-
-        # 🔥 WORD-BASED OPERATIONS
-        if has(query, SUM):
-            return jsonify({"output": str(sum(target))})
-
-        if has(query, COUNT):
-            return jsonify({"output": str(len(target))})
-
-        if has(query, MAX):
-            return jsonify({"output": str(max(target))})
-
-        if has(query, MIN):
-            return jsonify({"output": str(min(target))})
-
-        if has(query, AVG):
-            return jsonify({"output": str(sum(target)//len(target))})
-
-        if has(query, PRODUCT):
-            return jsonify({"output": str(reduce(operator.mul, target, 1))})
-
-        # 🔥 DIFFERENCE (important!)
-        if has(query, DIFF) and len(nums) >= 2:
-            return jsonify({"output": str(abs(nums[0] - nums[1]))})
-
-        # 🔥 SQUARE
-        if has(query, SQUARE):
-            return jsonify({"output": str(nums[0] ** 2)})
-
-        # 🔥 SORTING
-        if has(query, SORT):
-            sorted_nums = sorted(nums)
-            return jsonify({"output": " ".join(map(str, sorted_nums))})
-
-        # 🔥 FALLBACK (VERY IMPORTANT FOR COSINE)
-        # try sum → max → first number
-        return jsonify({"output": str(sum(nums))})
+        # 🔹 FALLBACK
+        return jsonify({"output": "I cannot solve this."})
 
     except:
-        return jsonify({"output": "0"})
+        return jsonify({"output": "I cannot solve this."})
 
 
 if __name__ == '__main__':
