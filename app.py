@@ -16,15 +16,25 @@ word_map = {
 }
 
 # -----------------------------
-# EXTRACT NUMBER
+# CLEAN TEXT
+# -----------------------------
+def clean_text(text):
+    return re.sub(r'[^\w\s.-]', ' ', text.lower())
+
+# -----------------------------
+# EXTRACT NUMBERS
 # -----------------------------
 def extract_numbers(text):
+    text = clean_text(text)
     nums = []
 
+    # digits
     nums += [float(x) for x in re.findall(r'-?\d+\.?\d*', text)]
 
-    words = text.lower().split()
+    # words
+    words = text.split()
     i = 0
+
     while i < len(words):
         w = words[i]
 
@@ -34,12 +44,16 @@ def extract_numbers(text):
             i += 1
             if i < len(words) and words[i] in word_map:
                 nums.append(sign * word_map[words[i]])
+
         elif w in word_map:
             val = word_map[w]
-            if i + 1 < len(words) and words[i+1] in word_map:
+
+            # handle twenty one, thirty five, etc.
+            if i + 1 < len(words) and words[i + 1] in word_map:
                 if val >= 20:
-                    val += word_map[words[i+1]]
+                    val += word_map[words[i + 1]]
                     i += 1
+
             nums.append(val)
 
         i += 1
@@ -51,16 +65,19 @@ def extract_numbers(text):
 # RULE ENGINE
 # -----------------------------
 def apply_rules(n):
+    # Rule 1
     if int(n) % 2 == 0:
         n = n * 2
     else:
         n = n + 10
 
+    # Rule 2
     if n > 20:
         n = n - 5
     else:
         n = n + 3
 
+    # Rule 3
     if int(n) % 3 == 0:
         return "FIZZ"
 
@@ -68,49 +85,43 @@ def apply_rules(n):
 
 
 # -----------------------------
-# RULE DETECTION (CRITICAL)
+# RULE DETECTION
 # -----------------------------
 def is_rule_problem(q):
-    lq = q.lower()
+    q = clean_text(q)
 
-    signals = 0
+    keywords = [
+        "even", "odd", "double", "add", "subtract",
+        "divisible", "fizz"
+    ]
 
-    if "even" in lq: signals += 1
-    if "odd" in lq: signals += 1
-    if "double" in lq or "multiply" in lq: signals += 1
-    if "add 10" in lq or "ten" in lq: signals += 1
-    if "subtract" in lq or "minus" in lq: signals += 1
-    if "add 3" in lq or "three" in lq: signals += 1
-    if "divisible" in lq: signals += 1
+    score = sum(1 for k in keywords if k in q)
 
-    if "fizz" in lq:
-        return True
-
-    return signals >= 3
+    return score >= 3
 
 
 # -----------------------------
 # BASIC SOLVER
 # -----------------------------
 def basic_solver(q, nums):
-    lq = q.lower()
+    q = q.lower()
 
     if not nums:
         return ""
 
-    if "sum" in lq or "add" in lq:
+    if "sum" in q or "add" in q:
         return str(int(sum(nums)))
 
-    if "average" in lq:
-        return str(int(sum(nums)/len(nums)))
+    if "average" in q:
+        return str(int(sum(nums) / len(nums)))
 
-    if "max" in lq:
+    if "max" in q:
         return str(int(max(nums)))
 
-    if "min" in lq:
+    if "min" in q:
         return str(int(min(nums)))
 
-    if "+" in q or "-" in q or "*" in q or "/" in q:
+    if any(op in q for op in "+-*/"):
         try:
             expr = re.sub(r'[^0-9+\-*/(). ]', '', q)
             return str(int(eval(expr)))
@@ -129,11 +140,10 @@ def solve(query):
 
     nums = extract_numbers(query)
 
-    # 🚨 RULE FIRST (IMPORTANT)
+    # 🚨 PRIORITY: RULE ENGINE
     if nums and is_rule_problem(query):
         return apply_rules(nums[0])
 
-    # fallback
     return basic_solver(query, nums)
 
 
@@ -146,6 +156,9 @@ def answer():
         data = request.get_json(silent=True) or {}
 
         query = str(data.get("query", ""))
+        # assets accepted but unused (important for Level 7 format)
+        _ = data.get("assets", [])
+
         result = solve(query)
 
         return jsonify({
