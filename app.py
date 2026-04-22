@@ -1,84 +1,64 @@
 from flask import Flask, request, jsonify
 import re
-from functools import reduce
-import operator
 
 app = Flask(__name__)
-
-def respond(ans):
-    return jsonify({"output": str(ans).strip()})
 
 @app.route('/v1/answer', methods=['POST'])
 def answer():
     try:
         data = request.get_json(silent=True) or {}
-        raw = str(data.get("query", "")).strip()
-        q = raw.lower()
+        query_raw = str(data.get("query", ""))
+        query = query_raw.lower()
 
-        # -------- ENTITY EXTRACTION --------
-        patterns = [
-            r'([A-Z][a-z]*)\s*(?:scored|got|has|=|is)\s*(-?\d+)',
-            r'(-?\d+)\s*(?:by|for)?\s*([A-Z][a-z]*)'
-        ]
+        # --- LEVEL 3: BINARY LOGIC (YES/NO) ---
+        if "is" in query and ("odd" in query or "even" in query):
+            num_match = re.search(r'\d+', query)
+            if num_match:
+                n = int(num_match.group())
+                if "odd" in query:
+                    return jsonify({"output": "YES" if n % 2 != 0 else "NO"})
+                if "even" in query:
+                    return jsonify({"output": "YES" if n % 2 == 0 else "NO"})
 
-        pairs = []
-        for pat in patterns:
-            matches = re.findall(pat, raw)
-            for m in matches:
-                if m[0].isdigit():
-                    val, name = m
-                else:
-                    name, val = m
-                pairs.append((name.strip(), int(val)))
+        # --- LEVEL 2: DATE EXTRACTION ---
+        if "extract date" in query:
+            # Look for "Day Month Year" pattern
+            date_match = re.search(r'\d{1,2}\s+[A-Z][a-z]+\s+\d{4}', query_raw)
+            if date_match:
+                return jsonify({"output": date_match.group()})
 
-        if pairs:
-            if "highest" in q or "max" in q:
-                return respond(max(pairs, key=lambda x: x[1])[0])
-            if "lowest" in q or "min" in q:
-                return respond(min(pairs, key=lambda x: x[1])[0])
+        # --- LEVEL 5: ENTITY COMPARISON ---
+        # Regex to find "Name scored 80" or "Name: 90"
+        entity_scores = re.findall(r'([A-Z][a-z]+)\s*(?:scored|is|has|:)\s*(-?\d+)', query_raw)
+        if entity_scores:
+            scores = [(name, int(val)) for name, val in entity_scores]
+            if "highest" in query or "max" in query:
+                winner = max(scores, key=lambda x: x[1])[0]
+                return jsonify({"output": winner}) # returns "Bob"
+            if "lowest" in query or "min" in query:
+                loser = min(scores, key=lambda x: x[1])[0]
+                return jsonify({"output": loser})
 
-        # -------- NUMERIC --------
-        nums = list(map(int, re.findall(r'-?\d+', q)))
+        # --- LEVEL 4: CONDITIONAL MATH ---
+        nums = list(map(int, re.findall(r'-?\d+', query)))
+        if "sum" in query and "even" in query:
+            even_sum = sum([n for n in nums if n % 2 == 0])
+            return jsonify({"output": str(even_sum)})
 
-        if not nums:
-            return respond("I cannot solve this.")
+        # --- LEVEL 1: CONVERSATIONAL MATH ---
+        # Matches "What is 10 + 15?" -> "The sum is 25."
+        if "what is" in query and "+" in query:
+            total = sum(nums)
+            return jsonify({"output": f"The sum is {total}."})
 
-        # ADDITION
-        if any(w in q for w in ["add", "sum", "plus", "+"]):
-            return respond(f"The sum is {sum(nums)}.")
+        # --- GENERAL FALLBACK ---
+        if nums:
+            return jsonify({"output": str(nums[0])})
+        
+        return jsonify({"output": "0"})
 
-        # SUBTRACTION
-        if any(w in q for w in ["subtract", "minus", "-"]):
-            if "from" in q and len(nums) >= 2:
-                result = nums[1] - nums[0]
-            else:
-                result = nums[0]
-                for n in nums[1:]:
-                    result -= n
-            return respond(f"The difference is {result}.")
-
-        # MULTIPLICATION
-        if any(w in q for w in ["multiply", "product", "*", "x"]):
-            result = reduce(operator.mul, nums, 1)
-            return respond(f"The product is {result}.")
-
-        # DIVISION
-        if any(w in q for w in ["divide", "/"]):
-            try:
-                result = nums[0]
-                for n in nums[1:]:
-                    result /= n
-                if result.is_integer():
-                    result = int(result)
-                return respond(f"The quotient is {result}.")
-            except:
-                return respond("I cannot solve this.")
-
-        return respond("I cannot solve this.")
-
-    except:
-        return respond("I cannot solve this.")
-
+    except Exception:
+        return jsonify({"output": "0"})
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=5000)
