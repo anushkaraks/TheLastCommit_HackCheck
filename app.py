@@ -3,197 +3,53 @@ import re
 
 app = Flask(__name__)
 
-# -----------------------------
-# Utilities
-# -----------------------------
-def clean(txt):
-    return txt.strip()
+def process_query(query):
+    # Extract number from query
+    nums = re.findall(r'-?\d+', query)
+    if not nums:
+        return ""
 
-def lower(txt):
-    return txt.lower().strip()
+    n = int(nums[0])
 
-def extract_numbers(txt):
-    return [float(x) for x in re.findall(r'-?\d+\.?\d*', txt)]
+    # Rule 1
+    if n % 2 == 0:
+        n = n * 2
+    else:
+        n = n + 10
 
-def format_num(n):
-    if int(n) == n:
-        return str(int(n))
-    return str(round(n, 2))
+    # Rule 2
+    if n > 20:
+        n = n - 5
+    else:
+        n = n + 3
 
-
-# -----------------------------
-# Detect Name + Score
-# -----------------------------
-def detect_scores(q):
-    patterns = [
-        r'([A-Z][a-zA-Z]+)\s*(?:scored|got|earned|has|had|is|=)\s*(-?\d+)',
-        r'(-?\d+)\s*(?:by|for)?\s*([A-Z][a-zA-Z]+)'
-    ]
-
-    results = []
-
-    for pat in patterns:
-        found = re.findall(pat, q)
-
-        for item in found:
-            if item[0].isdigit() or item[0].startswith("-"):
-                score = int(item[0])
-                name = item[1]
-            else:
-                name = item[0]
-                score = int(item[1])
-
-            results.append((name, score))
-
-    return results
+    # Rule 3
+    if n % 3 == 0:
+        return "FIZZ"
+    else:
+        return str(n)
 
 
-# -----------------------------
-# Solver
-# -----------------------------
-def solve(query, assets):
-    q = clean(query)
-
-    # 🔥 Extract actual task (robust)
-    match = re.search(r'(actual task|solve|question)\s*[:\-]\s*(.+)', q, re.I)
-    if match:
-        q = match.group(2).strip()
-
-    lq = lower(q)
-
-    # ======================================
-    # 🔥 PRIORITY 1: DIRECT ARITHMETIC
-    # ======================================
-    expr = re.sub(r'[^0-9+\-*/(). ]', '', q)
-
-    if expr and any(op in expr for op in "+-*/"):
-        try:
-            return format_num(eval(expr))
-        except:
-            pass
-
-    # ======================================
-    # SCORE QUESTIONS
-    # ======================================
-    scores = detect_scores(q)
-
-    if scores:
-        if any(x in lq for x in ["highest", "top", "max", "maximum", "winner", "best"]):
-            return max(scores, key=lambda x: x[1])[0]
-
-        if any(x in lq for x in ["lowest", "least", "minimum", "worst"]):
-            return min(scores, key=lambda x: x[1])[0]
-
-        return max(scores, key=lambda x: x[1])[0]
-
-    # ======================================
-    # NUMBERS LOGIC
-    # ======================================
-    nums = extract_numbers(q)
-
-    if nums:
-
-        if any(x in lq for x in ["sum", "total", "add", "plus"]):
-            return format_num(sum(nums))
-
-        if any(x in lq for x in ["average", "mean"]):
-            return format_num(sum(nums) / len(nums))
-
-        if any(x in lq for x in ["largest", "greatest", "highest", "maximum", "max"]):
-            return format_num(max(nums))
-
-        if any(x in lq for x in ["smallest", "lowest", "minimum", "least", "min"]):
-            return format_num(min(nums))
-
-        if any(x in lq for x in ["subtract", "minus"]):
-            if "from" in lq and len(nums) >= 2:
-                return format_num(nums[1] - nums[0])
-
-            ans = nums[0]
-            for n in nums[1:]:
-                ans -= n
-            return format_num(ans)
-
-        if any(x in lq for x in ["multiply", "product"]):
-            ans = 1
-            for n in nums:
-                ans *= n
-            return format_num(ans)
-
-        if any(x in lq for x in ["divide", "quotient"]):
-            try:
-                ans = nums[0]
-                for n in nums[1:]:
-                    ans /= n
-                return format_num(ans)
-            except:
-                pass
-
-        n = int(nums[0])
-
-        if "even" in lq:
-            return "Yes" if n % 2 == 0 else "No"
-
-        if "odd" in lq:
-            return "Yes" if n % 2 != 0 else "No"
-
-    # ======================================
-    # STRING TASKS
-    # ======================================
-    if "reverse" in lq:
-        txt = re.sub(r'reverse', '', q, flags=re.I).strip()
-        return txt[::-1]
-
-    if "count words" in lq or "how many words" in lq:
-        txt = re.sub(r'count words|how many words', '', lq).strip()
-        return str(len(txt.split()))
-
-    # ======================================
-    # ASSETS
-    # ======================================
-    if "assets" in lq:
-        return str(len(assets))
-
-    # ======================================
-    # GREETING
-    # ======================================
-    if any(x in lq for x in ["hello", "hi", "hey"]):
-        return "Hello"
-
-    # ======================================
-    # FINAL FALLBACK
-    # ======================================
-    if nums:
-        return format_num(nums[0])
-
-    return "I cannot solve this."
-
-
-# -----------------------------
-# API ROUTE
-# -----------------------------
 @app.route('/v1/answer', methods=['POST'])
 def answer():
     try:
         data = request.get_json(silent=True) or {}
 
-        query = str(data.get("query", ""))
-        assets = data.get("assets", [])
+        query = str(data.get("query", "")).strip()
+        # assets are accepted but not needed for this logic
+        # assets = data.get("assets", [])
 
-        result = solve(query, assets)
+        result = process_query(query)
 
         return jsonify({
-            "output": str(result).strip()
+            "output": result
         })
 
-    except Exception:
+    except Exception as e:
         return jsonify({
-            "output": "Error"
+            "output": ""
         })
 
 
-# -----------------------------
-# RUN
-# -----------------------------
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host='0.0.0.0', port=5000)
