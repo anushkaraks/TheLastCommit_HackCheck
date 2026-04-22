@@ -64,8 +64,13 @@ def solve(query, assets):
     # ======================================
     # 🚨 PRIORITY 0: LEVEL 7 RULE ENGINE
     # ======================================
-    if any(x in lq for x in ["rule", "rules", "apply", "fizz"]):
+    rule_keywords = [
+        "rule", "rules", "apply", "fizz",
+        "double", "add 10", "subtract 5",
+        "add 3", "divisible by 3"
+    ]
 
+    if any(k in lq for k in rule_keywords):
         nums = extract_numbers(q)
 
         if nums:
