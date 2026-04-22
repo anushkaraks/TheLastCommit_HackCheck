@@ -4,7 +4,7 @@ import re
 app = Flask(__name__)
 
 # -----------------------------
-# WORD MAP
+# WORD → NUMBER MAP
 # -----------------------------
 word_map = {
     "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4,
@@ -18,117 +18,100 @@ word_map = {
 # -----------------------------
 # CLEAN TEXT
 # -----------------------------
-def clean_text(text):
-    return re.sub(r'[^\w\s.-]', ' ', text.lower())
+def clean(text):
+    return re.sub(r'[^\w\s-]', ' ', text.lower())
+
 
 # -----------------------------
-# EXTRACT NUMBERS
+# EXTRACT NUMBER
 # -----------------------------
-def extract_numbers(text):
-    text = clean_text(text)
-    nums = []
+def extract_number(text):
+    text = clean(text)
 
     # digits
-    nums += [float(x) for x in re.findall(r'-?\d+\.?\d*', text)]
+    nums = re.findall(r'-?\d+', text)
+    if nums:
+        return int(nums[0])
 
-    # words
+    # word numbers
     words = text.split()
-    i = 0
+    for i, w in enumerate(words):
 
-    while i < len(words):
-        w = words[i]
+        if w in ["minus", "negative"] and i + 1 < len(words):
+            if words[i + 1] in word_map:
+                return -word_map[words[i + 1]]
 
-        sign = 1
-        if w in ["minus", "negative"]:
-            sign = -1
-            i += 1
-            if i < len(words) and words[i] in word_map:
-                nums.append(sign * word_map[words[i]])
-
-        elif w in word_map:
+        if w in word_map:
             val = word_map[w]
 
-            # handle twenty one, thirty five, etc.
             if i + 1 < len(words) and words[i + 1] in word_map:
                 if val >= 20:
                     val += word_map[words[i + 1]]
-                    i += 1
 
-            nums.append(val)
+            return val
 
-        i += 1
-
-    return nums
+    return None
 
 
 # -----------------------------
 # RULE ENGINE
 # -----------------------------
 def apply_rules(n):
-    # Rule 1
-    if int(n) % 2 == 0:
+    if n % 2 == 0:
         n = n * 2
     else:
         n = n + 10
 
-    # Rule 2
     if n > 20:
         n = n - 5
     else:
         n = n + 3
 
-    # Rule 3
-    if int(n) % 3 == 0:
+    if n % 3 == 0:
         return "FIZZ"
 
-    return str(int(n))
+    return str(n)
 
 
 # -----------------------------
-# RULE DETECTION
+# RULE DETECTION (SMART)
 # -----------------------------
-def is_rule_problem(q):
-    q = clean_text(q)
+def is_rule_query(q):
+    q = clean(q)
 
-    keywords = [
-        "even", "odd", "double", "add", "subtract",
+    # 🔥 direct triggers
+    if "apply rules" in q or "rule 1" in q:
+        return True
+
+    # keyword signals
+    signals = [
+        "even", "odd", "double",
+        "add 10", "subtract", "add 3",
         "divisible", "fizz"
     ]
 
-    score = sum(1 for k in keywords if k in q)
+    score = sum(1 for s in signals if s in q)
 
-    return score >= 3
+    return score >= 2
 
 
 # -----------------------------
 # BASIC SOLVER
 # -----------------------------
-def basic_solver(q, nums):
-    q = q.lower()
+def basic_solver(q):
+    q_clean = re.sub(r'[^0-9+\-*/(). ]', '', q)
 
-    if not nums:
-        return ""
+    try:
+        if q_clean.strip():
+            return str(int(eval(q_clean)))
+    except:
+        pass
 
-    if "sum" in q or "add" in q:
-        return str(int(sum(nums)))
+    nums = re.findall(r'-?\d+', q)
+    if nums:
+        return nums[0]
 
-    if "average" in q:
-        return str(int(sum(nums) / len(nums)))
-
-    if "max" in q:
-        return str(int(max(nums)))
-
-    if "min" in q:
-        return str(int(min(nums)))
-
-    if any(op in q for op in "+-*/"):
-        try:
-            expr = re.sub(r'[^0-9+\-*/(). ]', '', q)
-            return str(int(eval(expr)))
-        except:
-            pass
-
-    return str(int(nums[0]))
+    return ""
 
 
 # -----------------------------
@@ -138,13 +121,14 @@ def solve(query):
     if not query:
         return ""
 
-    nums = extract_numbers(query)
+    n = extract_number(query)
 
-    # 🚨 PRIORITY: RULE ENGINE
-    if nums and is_rule_problem(query):
-        return apply_rules(nums[0])
+    # 🚨 RULE ENGINE PRIORITY
+    if n is not None and is_rule_query(query):
+        return apply_rules(n)
 
-    return basic_solver(query, nums)
+    # fallback
+    return basic_solver(query)
 
 
 # -----------------------------
@@ -156,8 +140,7 @@ def answer():
         data = request.get_json(silent=True) or {}
 
         query = str(data.get("query", ""))
-        # assets accepted but unused (important for Level 7 format)
-        _ = data.get("assets", [])
+        _ = data.get("assets", [])  # required format
 
         result = solve(query)
 
@@ -165,7 +148,7 @@ def answer():
             "output": result.strip()
         })
 
-    except:
+    except Exception:
         return jsonify({
             "output": ""
         })
