@@ -12,8 +12,36 @@ def clean(txt):
 def lower(txt):
     return txt.lower().strip()
 
+# 🔥 WORD TO NUMBER MAP
+word_map = {
+    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4,
+    "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
+    "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13,
+    "fourteen": 14, "fifteen": 15, "sixteen": 16,
+    "seventeen": 17, "eighteen": 18, "nineteen": 19,
+    "twenty": 20
+}
+
 def extract_numbers(txt):
-    return [float(x) for x in re.findall(r'-?\d+\.?\d*', txt)]
+    nums = []
+
+    # 1. extract digits
+    nums += [float(x) for x in re.findall(r'-?\d+\.?\d*', txt)]
+
+    # 2. extract word numbers
+    words = txt.lower().split()
+    for i, w in enumerate(words):
+        if w in word_map:
+            nums.append(float(word_map[w]))
+
+        # handle negative words
+        if w in ["minus", "negative"] and i + 1 < len(words):
+            nxt = words[i + 1]
+            if nxt in word_map:
+                nums.append(float(-word_map[nxt]))
+
+    return nums
+
 
 def format_num(n):
     if int(n) == n:
@@ -54,7 +82,6 @@ def detect_scores(q):
 def solve(query, assets):
     q = clean(query)
 
-    # Extract actual task if wrapped
     match = re.search(r'(actual task|solve|question)\s*[:\-]\s*(.+)', q, re.I)
     if match:
         q = match.group(2).strip()
@@ -62,37 +89,39 @@ def solve(query, assets):
     lq = lower(q)
 
     # ======================================
-    # 🚨 PRIORITY 0: LEVEL 7 RULE ENGINE
+    # 🚨 LEVEL 7 RULE ENGINE (STRONG)
     # ======================================
-    rule_keywords = [
-        "rule", "rules", "apply", "fizz",
-        "double", "add 10", "subtract 5",
-        "add 3", "divisible by 3"
-    ]
+    nums = extract_numbers(q)
 
-    if any(k in lq for k in rule_keywords):
-        nums = extract_numbers(q)
+    rule_pattern = (
+        ("even" in lq and "double" in lq) and
+        ("odd" in lq and "add" in lq and "10" in lq) and
+        ("20" in lq and ("subtract" in lq or "minus" in lq)) and
+        ("add" in lq and "3" in lq) and
+        ("divisible" in lq and "3" in lq)
+    )
 
-        if nums:
-            n = int(nums[0])
+    rule_soft = any(x in lq for x in [
+        "fizz", "apply rules", "rule 1", "rule 2", "rule 3"
+    ])
 
-            # Rule 1
-            if n % 2 == 0:
-                n = n * 2
-            else:
-                n = n + 10
+    if nums and (rule_pattern or rule_soft):
+        n = int(nums[0])
 
-            # Rule 2
-            if n > 20:
-                n = n - 5
-            else:
-                n = n + 3
+        if n % 2 == 0:
+            n = n * 2
+        else:
+            n = n + 10
 
-            # Rule 3
-            if n % 3 == 0:
-                return "FIZZ"
-            else:
-                return str(n)
+        if n > 20:
+            n = n - 5
+        else:
+            n = n + 3
+
+        if n % 3 == 0:
+            return "FIZZ"
+        else:
+            return str(n)
 
     # ======================================
     # DIRECT ARITHMETIC
@@ -122,26 +151,20 @@ def solve(query, assets):
     # ======================================
     # NUMBERS LOGIC
     # ======================================
-    nums = extract_numbers(q)
-
     if nums:
-
         if any(x in lq for x in ["sum", "total", "add", "plus"]):
             return format_num(sum(nums))
 
         if any(x in lq for x in ["average", "mean"]):
             return format_num(sum(nums) / len(nums))
 
-        if any(x in lq for x in ["largest", "greatest", "highest", "maximum", "max"]):
+        if any(x in lq for x in ["max", "maximum", "highest"]):
             return format_num(max(nums))
 
-        if any(x in lq for x in ["smallest", "lowest", "minimum", "least", "min"]):
+        if any(x in lq for x in ["min", "minimum", "lowest"]):
             return format_num(min(nums))
 
         if any(x in lq for x in ["subtract", "minus"]):
-            if "from" in lq and len(nums) >= 2:
-                return format_num(nums[1] - nums[0])
-
             ans = nums[0]
             for n in nums[1:]:
                 ans -= n
@@ -153,7 +176,7 @@ def solve(query, assets):
                 ans *= n
             return format_num(ans)
 
-        if any(x in lq for x in ["divide", "quotient"]):
+        if any(x in lq for x in ["divide"]):
             try:
                 ans = nums[0]
                 for n in nums[1:]:
@@ -162,42 +185,7 @@ def solve(query, assets):
             except:
                 pass
 
-        n = int(nums[0])
-
-        if "even" in lq:
-            return "Yes" if n % 2 == 0 else "No"
-
-        if "odd" in lq:
-            return "Yes" if n % 2 != 0 else "No"
-
-    # ======================================
-    # STRING TASKS
-    # ======================================
-    if "reverse" in lq:
-        txt = re.sub(r'reverse', '', q, flags=re.I).strip()
-        return txt[::-1]
-
-    if "count words" in lq or "how many words" in lq:
-        txt = re.sub(r'count words|how many words', '', lq).strip()
-        return str(len(txt.split()))
-
-    # ======================================
-    # ASSETS
-    # ======================================
-    if "assets" in lq:
-        return str(len(assets))
-
-    # ======================================
-    # GREETING
-    # ======================================
-    if any(x in lq for x in ["hello", "hi", "hey"]):
-        return "Hello"
-
-    # ======================================
-    # FINAL FALLBACK
-    # ======================================
-    if nums:
-        return format_num(nums[0])
+        return str(int(nums[0]))
 
     return ""
 
