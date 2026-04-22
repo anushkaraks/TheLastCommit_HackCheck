@@ -5,115 +5,79 @@ import operator
 
 app = Flask(__name__)
 
+def respond(ans):
+    return jsonify({"output": str(ans).strip()})
+
 @app.route('/v1/answer', methods=['POST'])
 def answer():
     try:
         data = request.get_json(silent=True) or {}
-        query_raw = str(data.get("query", ""))
-        query = query_raw.lower()
-        assets = data.get("assets", [])
+        raw = str(data.get("query", "")).strip()
+        q = raw.lower()
 
-        # Clean query
-        query = re.sub(r'[^a-z0-9\s\-\+\*/]', ' ', query)
+        # -------- ENTITY EXTRACTION --------
+        patterns = [
+            r'([A-Z][a-z]*)\s*(?:scored|got|has|=|is)\s*(-?\d+)',
+            r'(-?\d+)\s*(?:by|for)?\s*([A-Z][a-z]*)'
+        ]
 
-        # 🔥 NAME + SCORE EXTRACTION (Level 5 critical)
-        pairs = re.findall(r'([a-zA-Z]+)\s+scored\s+(\d+)', query_raw)
+        pairs = []
+        for pat in patterns:
+            matches = re.findall(pat, raw)
+            for m in matches:
+                if m[0].isdigit():
+                    val, name = m
+                else:
+                    name, val = m
+                pairs.append((name.strip(), int(val)))
 
         if pairs:
-            max_name = ""
-            max_score = -float("inf")
+            if "highest" in q or "max" in q:
+                return respond(max(pairs, key=lambda x: x[1])[0])
+            if "lowest" in q or "min" in q:
+                return respond(min(pairs, key=lambda x: x[1])[0])
 
-            for name, score in pairs:
-                score = int(score)
-                if score > max_score:
-                    max_score = score
-                    max_name = name
-
-            return jsonify({"output": max_name})
-
-        # Extract numbers
-        nums = list(map(int, re.findall(r'-?\d+', query)))
+        # -------- NUMERIC --------
+        nums = list(map(int, re.findall(r'-?\d+', q)))
 
         if not nums:
-            return jsonify({"output": "0"})
+            return respond("I cannot solve this.")
 
-        even = [x for x in nums if x % 2 == 0]
-        odd = [x for x in nums if x % 2 != 0]
+        # ADDITION
+        if any(w in q for w in ["add", "sum", "plus", "+"]):
+            return respond(f"The sum is {sum(nums)}.")
 
-        def has(q, words):
-            return any(w in q for w in words)
+        # SUBTRACTION
+        if any(w in q for w in ["subtract", "minus", "-"]):
+            if "from" in q and len(nums) >= 2:
+                result = nums[1] - nums[0]
+            else:
+                result = nums[0]
+                for n in nums[1:]:
+                    result -= n
+            return respond(f"The difference is {result}.")
 
-        SUM = ["sum", "add", "total"]
-        AVG = ["average", "mean"]
-        MAX = ["max", "largest", "highest"]
-        MIN = ["min", "smallest", "lowest"]
-        COUNT = ["count", "how many"]
-        PRODUCT = ["product", "multiply"]
-        EVEN = ["even"]
-        ODD = ["odd"]
-        SORT = ["sort", "arrange", "order"]
-        DIFF = ["difference", "subtract"]
-        SQUARE = ["square"]
+        # MULTIPLICATION
+        if any(w in q for w in ["multiply", "product", "*", "x"]):
+            result = reduce(operator.mul, nums, 1)
+            return respond(f"The product is {result}.")
 
-        target = nums
-        if has(query, EVEN):
-            target = even
-        elif has(query, ODD):
-            target = odd
+        # DIVISION
+        if any(w in q for w in ["divide", "/"]):
+            try:
+                result = nums[0]
+                for n in nums[1:]:
+                    result /= n
+                if result.is_integer():
+                    result = int(result)
+                return respond(f"The quotient is {result}.")
+            except:
+                return respond("I cannot solve this.")
 
-        if not target:
-            return jsonify({"output": "0"})
-
-        # 🔥 DIRECT SYMBOL OPERATIONS
-        if "+" in query:
-            return jsonify({"output": str(sum(nums))})
-
-        if "-" in query and len(nums) >= 2:
-            return jsonify({"output": str(nums[0] - nums[1])})
-
-        if "*" in query:
-            return jsonify({"output": str(reduce(operator.mul, nums, 1))})
-
-        if "/" in query and len(nums) >= 2 and nums[1] != 0:
-            return jsonify({"output": str(nums[0] // nums[1])})
-
-        # 🔥 WORD-BASED OPERATIONS
-        if has(query, SUM):
-            return jsonify({"output": str(sum(target))})
-
-        if has(query, COUNT):
-            return jsonify({"output": str(len(target))})
-
-        if has(query, MAX):
-            return jsonify({"output": str(max(target))})
-
-        if has(query, MIN):
-            return jsonify({"output": str(min(target))})
-
-        if has(query, AVG):
-            return jsonify({"output": str(sum(target)//len(target))})
-
-        if has(query, PRODUCT):
-            return jsonify({"output": str(reduce(operator.mul, target, 1))})
-
-        # 🔥 DIFFERENCE
-        if has(query, DIFF) and len(nums) >= 2:
-            return jsonify({"output": str(abs(nums[0] - nums[1]))})
-
-        # 🔥 SQUARE
-        if has(query, SQUARE):
-            return jsonify({"output": str(nums[0] ** 2)})
-
-        # 🔥 SORTING
-        if has(query, SORT):
-            sorted_nums = sorted(nums)
-            return jsonify({"output": " ".join(map(str, sorted_nums))})
-
-        # 🔥 FALLBACK
-        return jsonify({"output": str(sum(nums))})
+        return respond("I cannot solve this.")
 
     except:
-        return jsonify({"output": "0"})
+        return respond("I cannot solve this.")
 
 
 if __name__ == '__main__':
