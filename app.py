@@ -6,12 +6,12 @@ app = Flask(__name__)
 @app.route('/v1/answer', methods=['POST'])
 def answer():
     data = request.get_json(silent=True) or {}
-    query = data.get("query", "").strip().lower()
+    query = str(data.get("query", "")).strip().lower()
 
     numbers = list(map(int, re.findall(r'-?\d+', query)))
 
-    # 🔹 LEVEL 4: SUM EVEN NUMBERS
-    if "even" in query and "sum" in query:
+    # 🔹 LEVEL 4: SUM EVEN NUMBERS (MUST COME FIRST)
+    if "sum" in query and "even" in query:
         even_nums = [n for n in numbers if n % 2 == 0]
         return jsonify({"output": str(sum(even_nums))})
 
@@ -23,7 +23,7 @@ def answer():
         return jsonify({"output": "YES" if numbers[0] % 2 == 0 else "NO"})
 
     # 🔹 LEVEL 2: DATE EXTRACTION
-    date_match = re.search(r'\d{1,2} [A-Za-z]+ \d{4}', query)
+    date_match = re.search(r'\d{1,2} [a-zA-Z]+ \d{4}', query)
     if date_match:
         return jsonify({"output": date_match.group(0)})
 
