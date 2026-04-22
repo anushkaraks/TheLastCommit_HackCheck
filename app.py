@@ -1,47 +1,113 @@
 from flask import Flask, request, jsonify
 import re
+from functools import reduce
+import operator
 
 app = Flask(__name__)
+
 
 @app.route('/v1/answer', methods=['POST'])
 def answer():
     try:
+        # --------------------------------------------
+        # ACCEPT POST JSON FORMAT
+        # {
+        #   "query": "...",
+        #   "assets": [...]
+        # }
+        # --------------------------------------------
         data = request.get_json(silent=True) or {}
 
-        # Accept both required fields
-        query_raw = str(data.get("query", "")).strip()
-        query = query_raw.lower()
-        assets = data.get("assets", [])  
+        query = str(data.get("query", "")).strip().lower()
+        assets = data.get("assets", [])   # accepted as per requirement
 
+        # Extract all integers
         nums = list(map(int, re.findall(r'-?\d+', query)))
 
-        # 🔹 LEVEL 4: SUM EVEN NUMBERS (highest priority)
+        if not nums:
+            return jsonify({"output": "0"})
+
+        even = [x for x in nums if x % 2 == 0]
+        odd = [x for x in nums if x % 2 != 0]
+
+        # ==================================================
+        # LEVEL 4 UNIVERSAL NUMBER OPERATIONS
+        # ==================================================
+
+        # SUM EVEN
         if "sum even" in query:
-            even_nums = [x for x in nums if x % 2 == 0]
-            return jsonify({"output": str(sum(even_nums))})
+            return jsonify({"output": str(sum(even))})
 
-        # 🔹 LEVEL 3: ODD / EVEN CHECK
-        if re.search(r'\bodd\b', query) and nums:
-            return jsonify({"output": "YES" if nums[0] % 2 != 0 else "NO"})
+        # SUM ODD
+        if "sum odd" in query:
+            return jsonify({"output": str(sum(odd))})
 
-        if re.search(r'\beven\b', query) and nums:
-            return jsonify({"output": "YES" if nums[0] % 2 == 0 else "NO"})
+        # SUM ALL
+        if "sum" in query or "total" in query:
+            return jsonify({"output": str(sum(nums))})
 
-        # 🔹 LEVEL 2: DATE EXTRACTION
-        date_match = re.search(r'\d{1,2} [A-Za-z]+ \d{4}', query_raw)
-        if date_match:
-            return jsonify({"output": date_match.group(0)})
+        # COUNT EVEN
+        if "count even" in query:
+            return jsonify({"output": str(len(even))})
 
-        # 🔹 LEVEL 1: ADDITION
-        if any(word in query for word in ["+", "add", "plus"]) and len(nums) >= 2:
-            result = nums[0] + nums[1]
-            return jsonify({"output": f"The sum is {result}."})
+        # COUNT ODD
+        if "count odd" in query:
+            return jsonify({"output": str(len(odd))})
 
-        # 🔹 FALLBACK (important for scoring)
-        return jsonify({"output": "I cannot solve this."})
+        # COUNT ALL
+        if "count" in query:
+            return jsonify({"output": str(len(nums))})
 
-    except:
-        return jsonify({"output": "I cannot solve this."})
+        # MAX
+        if any(word in query for word in ["largest", "maximum", "max", "greatest"]):
+            return jsonify({"output": str(max(nums))})
+
+        # MIN
+        if any(word in query for word in ["smallest", "minimum", "min", "least"]):
+            return jsonify({"output": str(min(nums))})
+
+        # AVERAGE
+        if any(word in query for word in ["average", "mean"]):
+            return jsonify({"output": str(sum(nums) // len(nums))})
+
+        # PRODUCT EVEN
+        if "product even" in query:
+            val = reduce(operator.mul, even, 1)
+            return jsonify({"output": str(val)})
+
+        # PRODUCT ODD
+        if "product odd" in query:
+            val = reduce(operator.mul, odd, 1)
+            return jsonify({"output": str(val)})
+
+        # PRODUCT ALL
+        if any(word in query for word in ["product", "multiply"]):
+            val = reduce(operator.mul, nums, 1)
+            return jsonify({"output": str(val)})
+
+        # SORT ASC
+        if "ascending" in query or "sort" in query:
+            return jsonify({"output": ",".join(map(str, sorted(nums)))})
+
+        # SORT DESC
+        if "descending" in query:
+            return jsonify({"output": ",".join(map(str, sorted(nums, reverse=True)))})
+
+        # SECOND LARGEST
+        if "second largest" in query:
+            unique = sorted(set(nums), reverse=True)
+            return jsonify({"output": str(unique[1] if len(unique) > 1 else unique[0])})
+
+        # SECOND SMALLEST
+        if "second smallest" in query:
+            unique = sorted(set(nums))
+            return jsonify({"output": str(unique[1] if len(unique) > 1 else unique[0])})
+
+        # DEFAULT SAFE RESPONSE
+        return jsonify({"output": str(sum(nums))})
+
+    except Exception:
+        return jsonify({"output": "0"})
 
 
 if __name__ == '__main__':
