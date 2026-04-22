@@ -8,29 +8,31 @@ def answer():
     data = request.get_json(silent=True) or {}
     query = data.get("query", "").strip().lower()
 
-    # LEVEL 3: ODD / EVEN
-    if "odd" in query:
-        numbers = list(map(int, re.findall(r'-?\d+', query)))
-        if numbers:
-            return jsonify({"output": "YES" if numbers[0] % 2 != 0 else "NO"})
+    numbers = list(map(int, re.findall(r'-?\d+', query)))
 
-    if "even" in query:
-        numbers = list(map(int, re.findall(r'-?\d+', query)))
-        if numbers:
-            return jsonify({"output": "YES" if numbers[0] % 2 == 0 else "NO"})
+    # 🔹 LEVEL 4: SUM EVEN NUMBERS
+    if "even" in query and "sum" in query:
+        even_nums = [n for n in numbers if n % 2 == 0]
+        return jsonify({"output": str(sum(even_nums))})
 
-    # LEVEL 2: DATE EXTRACTION
+    # 🔹 LEVEL 3: ODD / EVEN CHECK
+    if "odd" in query and numbers:
+        return jsonify({"output": "YES" if numbers[0] % 2 != 0 else "NO"})
+
+    if "even" in query and numbers:
+        return jsonify({"output": "YES" if numbers[0] % 2 == 0 else "NO"})
+
+    # 🔹 LEVEL 2: DATE EXTRACTION
     date_match = re.search(r'\d{1,2} [A-Za-z]+ \d{4}', query)
     if date_match:
         return jsonify({"output": date_match.group(0)})
 
-    # LEVEL 1: ADDITION
-    numbers = list(map(int, re.findall(r'-?\d+', query)))
+    # 🔹 LEVEL 1: ADDITION
     if any(word in query for word in ["+", "add", "sum", "plus"]) and len(numbers) >= 2:
         result = numbers[0] + numbers[1]
         return jsonify({"output": f"The sum is {result}."})
 
-    # FALLBACK
+    # 🔹 FALLBACK
     return jsonify({"output": "I cannot solve this."})
 
 
