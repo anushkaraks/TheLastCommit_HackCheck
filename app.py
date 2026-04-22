@@ -54,12 +54,23 @@ def detect_scores(q):
 def solve(query, assets):
     q = clean(query)
 
-    # 🔥 LEVEL 6 FIX: Extract actual task
-    match = re.search(r'(actual task|solve|question)\s*[:\-]\s*(.*)', q, re.I)
+    # 🔥 Extract actual task (robust)
+    match = re.search(r'(actual task|solve|question)\s*[:\-]\s*(.+)', q, re.I)
     if match:
         q = match.group(2).strip()
 
     lq = lower(q)
+
+    # ======================================
+    # 🔥 PRIORITY 1: DIRECT ARITHMETIC
+    # ======================================
+    expr = re.sub(r'[^0-9+\-*/(). ]', '', q)
+
+    if expr and any(op in expr for op in "+-*/"):
+        try:
+            return format_num(eval(expr))
+        except:
+            pass
 
     # ======================================
     # SCORE QUESTIONS
@@ -76,23 +87,23 @@ def solve(query, assets):
         return max(scores, key=lambda x: x[1])[0]
 
     # ======================================
-    # NUMBERS
+    # NUMBERS LOGIC
     # ======================================
     nums = extract_numbers(q)
 
     if nums:
-
-        if any(x in lq for x in ["largest", "greatest", "highest", "maximum", "max"]):
-            return format_num(max(nums))
-
-        if any(x in lq for x in ["smallest", "lowest", "minimum", "least", "min"]):
-            return format_num(min(nums))
 
         if any(x in lq for x in ["sum", "total", "add", "plus"]):
             return format_num(sum(nums))
 
         if any(x in lq for x in ["average", "mean"]):
             return format_num(sum(nums) / len(nums))
+
+        if any(x in lq for x in ["largest", "greatest", "highest", "maximum", "max"]):
+            return format_num(max(nums))
+
+        if any(x in lq for x in ["smallest", "lowest", "minimum", "least", "min"]):
+            return format_num(min(nums))
 
         if any(x in lq for x in ["subtract", "minus"]):
             if "from" in lq and len(nums) >= 2:
@@ -127,17 +138,6 @@ def solve(query, assets):
             return "Yes" if n % 2 != 0 else "No"
 
     # ======================================
-    # DIRECT ARITHMETIC
-    # ======================================
-    expr = re.sub(r'[^0-9+\-*/(). ]', '', q)
-
-    if expr and any(op in expr for op in "+-*/"):
-        try:
-            return format_num(eval(expr))
-        except:
-            pass
-
-    # ======================================
     # STRING TASKS
     # ======================================
     if "reverse" in lq:
@@ -161,7 +161,7 @@ def solve(query, assets):
         return "Hello"
 
     # ======================================
-    # FALLBACK
+    # FINAL FALLBACK
     # ======================================
     if nums:
         return format_num(nums[0])
@@ -170,7 +170,7 @@ def solve(query, assets):
 
 
 # -----------------------------
-# API ROUTE (IMPORTANT)
+# API ROUTE
 # -----------------------------
 @app.route('/v1/answer', methods=['POST'])
 def answer():
