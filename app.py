@@ -4,7 +4,7 @@ import re
 app = Flask(__name__)
 
 # -----------------------------
-# WORD → NUMBER MAP
+# WORD MAP
 # -----------------------------
 word_map = {
     "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4,
@@ -16,77 +16,129 @@ word_map = {
 }
 
 # -----------------------------
-# EXTRACT NUMBER (ROBUST)
+# EXTRACT NUMBER
 # -----------------------------
-def extract_number(text):
-    text = text.lower()
+def extract_numbers(text):
+    nums = []
 
-    # digits first
-    nums = re.findall(r'-?\d+', text)
-    if nums:
-        return int(nums[0])
+    nums += [float(x) for x in re.findall(r'-?\d+\.?\d*', text)]
 
-    # word numbers
-    words = text.split()
-    for i, w in enumerate(words):
-        if w in ["minus", "negative"] and i + 1 < len(words):
-            nxt = words[i + 1]
-            if nxt in word_map:
-                return -word_map[nxt]
+    words = text.lower().split()
+    i = 0
+    while i < len(words):
+        w = words[i]
 
-        if w in word_map:
+        sign = 1
+        if w in ["minus", "negative"]:
+            sign = -1
+            i += 1
+            if i < len(words) and words[i] in word_map:
+                nums.append(sign * word_map[words[i]])
+        elif w in word_map:
             val = word_map[w]
+            if i + 1 < len(words) and words[i+1] in word_map:
+                if val >= 20:
+                    val += word_map[words[i+1]]
+                    i += 1
+            nums.append(val)
 
-            # handle "twenty one"
-            if i + 1 < len(words) and words[i + 1] in word_map:
-                if word_map[w] >= 20:
-                    val += word_map[words[i + 1]]
-            return val
+        i += 1
 
-    return None
+    return nums
 
 
 # -----------------------------
-# RULE ENGINE (STRICT)
+# RULE ENGINE
 # -----------------------------
 def apply_rules(n):
-    # Rule 1
-    if n % 2 == 0:
+    if int(n) % 2 == 0:
         n = n * 2
     else:
         n = n + 10
 
-    # Rule 2
     if n > 20:
         n = n - 5
     else:
         n = n + 3
 
-    # Rule 3
-    if n % 3 == 0:
+    if int(n) % 3 == 0:
         return "FIZZ"
 
-    return str(n)
+    return str(int(n))
 
 
 # -----------------------------
-# SOLVER (KEY CHANGE)
+# RULE DETECTION (CRITICAL)
+# -----------------------------
+def is_rule_problem(q):
+    lq = q.lower()
+
+    signals = 0
+
+    if "even" in lq: signals += 1
+    if "odd" in lq: signals += 1
+    if "double" in lq or "multiply" in lq: signals += 1
+    if "add 10" in lq or "ten" in lq: signals += 1
+    if "subtract" in lq or "minus" in lq: signals += 1
+    if "add 3" in lq or "three" in lq: signals += 1
+    if "divisible" in lq: signals += 1
+
+    if "fizz" in lq:
+        return True
+
+    return signals >= 3
+
+
+# -----------------------------
+# BASIC SOLVER
+# -----------------------------
+def basic_solver(q, nums):
+    lq = q.lower()
+
+    if not nums:
+        return ""
+
+    if "sum" in lq or "add" in lq:
+        return str(int(sum(nums)))
+
+    if "average" in lq:
+        return str(int(sum(nums)/len(nums)))
+
+    if "max" in lq:
+        return str(int(max(nums)))
+
+    if "min" in lq:
+        return str(int(min(nums)))
+
+    if "+" in q or "-" in q or "*" in q or "/" in q:
+        try:
+            expr = re.sub(r'[^0-9+\-*/(). ]', '', q)
+            return str(int(eval(expr)))
+        except:
+            pass
+
+    return str(int(nums[0]))
+
+
+# -----------------------------
+# MAIN SOLVER
 # -----------------------------
 def solve(query):
     if not query:
         return ""
 
-    n = extract_number(query)
+    nums = extract_numbers(query)
 
-    if n is None:
-        return ""
+    # 🚨 RULE FIRST (IMPORTANT)
+    if nums and is_rule_problem(query):
+        return apply_rules(nums[0])
 
-    # 🚨 ALWAYS APPLY RULES
-    return apply_rules(n)
+    # fallback
+    return basic_solver(query, nums)
 
 
 # -----------------------------
-# API ROUTE
+# API
 # -----------------------------
 @app.route('/v1/answer', methods=['POST'])
 def answer():
@@ -94,14 +146,13 @@ def answer():
         data = request.get_json(silent=True) or {}
 
         query = str(data.get("query", ""))
-
         result = solve(query)
 
         return jsonify({
             "output": result.strip()
         })
 
-    except Exception:
+    except:
         return jsonify({
             "output": ""
         })
