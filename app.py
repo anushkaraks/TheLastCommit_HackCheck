@@ -1,139 +1,199 @@
 from flask import Flask, request, jsonify
 import re
-from functools import reduce
-import operator
 
 app = Flask(__name__)
 
-def respond(ans):
-    return jsonify({"output": str(ans).strip()})
+# -----------------------------
+# Utilities
+# -----------------------------
+def clean(txt):
+    return txt.strip()
 
+def lower(txt):
+    return txt.lower().strip()
+
+def extract_numbers(txt):
+    return [float(x) for x in re.findall(r'-?\d+\.?\d*', txt)]
+
+def format_num(n):
+    if int(n) == n:
+        return str(int(n))
+    return str(round(n, 2))
+
+
+# -----------------------------
+# Detect Name + Score
+# -----------------------------
+def detect_scores(q):
+    patterns = [
+        r'([A-Z][a-zA-Z]+)\s*(?:scored|got|earned|has|had|is|=)\s*(-?\d+)',
+        r'(-?\d+)\s*(?:by|for)?\s*([A-Z][a-zA-Z]+)'
+    ]
+
+    results = []
+
+    for pat in patterns:
+        found = re.findall(pat, q)
+
+        for item in found:
+            if item[0].isdigit() or item[0].startswith("-"):
+                score = int(item[0])
+                name = item[1]
+            else:
+                name = item[0]
+                score = int(item[1])
+
+            results.append((name, score))
+
+    return results
+
+
+# -----------------------------
+# Solver
+# -----------------------------
+def solve(query, assets):
+    q = clean(query)
+
+    # 🔥 LEVEL 6 FIX: Extract actual task
+    match = re.search(r'(actual task|solve|question)\s*[:\-]\s*(.*)', q, re.I)
+    if match:
+        q = match.group(2).strip()
+
+    lq = lower(q)
+
+    # ======================================
+    # SCORE QUESTIONS
+    # ======================================
+    scores = detect_scores(q)
+
+    if scores:
+        if any(x in lq for x in ["highest", "top", "max", "maximum", "winner", "best"]):
+            return max(scores, key=lambda x: x[1])[0]
+
+        if any(x in lq for x in ["lowest", "least", "minimum", "worst"]):
+            return min(scores, key=lambda x: x[1])[0]
+
+        return max(scores, key=lambda x: x[1])[0]
+
+    # ======================================
+    # NUMBERS
+    # ======================================
+    nums = extract_numbers(q)
+
+    if nums:
+
+        if any(x in lq for x in ["largest", "greatest", "highest", "maximum", "max"]):
+            return format_num(max(nums))
+
+        if any(x in lq for x in ["smallest", "lowest", "minimum", "least", "min"]):
+            return format_num(min(nums))
+
+        if any(x in lq for x in ["sum", "total", "add", "plus"]):
+            return format_num(sum(nums))
+
+        if any(x in lq for x in ["average", "mean"]):
+            return format_num(sum(nums) / len(nums))
+
+        if any(x in lq for x in ["subtract", "minus"]):
+            if "from" in lq and len(nums) >= 2:
+                return format_num(nums[1] - nums[0])
+
+            ans = nums[0]
+            for n in nums[1:]:
+                ans -= n
+            return format_num(ans)
+
+        if any(x in lq for x in ["multiply", "product"]):
+            ans = 1
+            for n in nums:
+                ans *= n
+            return format_num(ans)
+
+        if any(x in lq for x in ["divide", "quotient"]):
+            try:
+                ans = nums[0]
+                for n in nums[1:]:
+                    ans /= n
+                return format_num(ans)
+            except:
+                pass
+
+        n = int(nums[0])
+
+        if "even" in lq:
+            return "Yes" if n % 2 == 0 else "No"
+
+        if "odd" in lq:
+            return "Yes" if n % 2 != 0 else "No"
+
+    # ======================================
+    # DIRECT ARITHMETIC
+    # ======================================
+    expr = re.sub(r'[^0-9+\-*/(). ]', '', q)
+
+    if expr and any(op in expr for op in "+-*/"):
+        try:
+            return format_num(eval(expr))
+        except:
+            pass
+
+    # ======================================
+    # STRING TASKS
+    # ======================================
+    if "reverse" in lq:
+        txt = re.sub(r'reverse', '', q, flags=re.I).strip()
+        return txt[::-1]
+
+    if "count words" in lq or "how many words" in lq:
+        txt = re.sub(r'count words|how many words', '', lq).strip()
+        return str(len(txt.split()))
+
+    # ======================================
+    # ASSETS
+    # ======================================
+    if "assets" in lq:
+        return str(len(assets))
+
+    # ======================================
+    # GREETING
+    # ======================================
+    if any(x in lq for x in ["hello", "hi", "hey"]):
+        return "Hello"
+
+    # ======================================
+    # FALLBACK
+    # ======================================
+    if nums:
+        return format_num(nums[0])
+
+    return "I cannot solve this."
+
+
+# -----------------------------
+# API ROUTE (IMPORTANT)
+# -----------------------------
 @app.route('/v1/answer', methods=['POST'])
 def answer():
     try:
         data = request.get_json(silent=True) or {}
-        raw = str(data.get("query", "")).strip()
-        q = raw.lower()
 
-        # -------- EXTRACT NUMBERS --------
-        nums = list(map(int, re.findall(r'-?\d+', q)))
+        query = str(data.get("query", ""))
+        assets = data.get("assets", [])
 
-        # -------- LEVEL 3: YES/NO (ODD/EVEN) --------
-        if "is" in q and ("odd" in q or "even" in q):
-            if nums:
-                n = nums[0]
-                if "odd" in q:
-                    return respond("YES" if n % 2 != 0 else "NO")
-                if "even" in q:
-                    return respond("YES" if n % 2 == 0 else "NO")
+        result = solve(query, assets)
 
-        # -------- LEVEL 2: DATE EXTRACTION --------
-        if "date" in q:
-            date_match = re.search(r'\d{1,2}\s+[A-Za-z]+\s+\d{4}', raw)
-            if date_match:
-                return respond(date_match.group())
+        return jsonify({
+            "output": str(result).strip()
+        })
 
-        # -------- LEVEL 5: ENTITY COMPARISON --------
-        patterns = [
-            r'([A-Z][a-z]*)\s*(?:scored|got|has|=|is|:)\s*(-?\d+)',
-            r'(-?\d+)\s*(?:by|for)?\s*([A-Z][a-z]*)'
-        ]
-
-        pairs = []
-        for pat in patterns:
-            matches = re.findall(pat, raw)
-            for m in matches:
-                if m[0].isdigit():
-                    val, name = m
-                else:
-                    name, val = m
-                pairs.append((name.strip(), int(val)))
-
-        if pairs and any(w in q for w in ["highest", "max", "largest", "lowest", "min", "smallest"]):
-            if any(w in q for w in ["highest", "max", "largest"]):
-                return respond(max(pairs, key=lambda x: x[1])[0])
-            if any(w in q for w in ["lowest", "min", "smallest"]):
-                return respond(min(pairs, key=lambda x: x[1])[0])
-
-        # -------- IF NO NUMBERS --------
-        if not nums:
-            return respond("0")
-
-        # -------- FILTERS --------
-        even = [x for x in nums if x % 2 == 0]
-        odd = [x for x in nums if x % 2 != 0]
-
-        def has(words):
-            return any(w in q for w in words)
-
-        SUM = ["sum", "add", "total", "plus"]
-        AVG = ["average", "mean"]
-        MAX = ["max", "largest", "highest"]
-        MIN = ["min", "smallest", "lowest"]
-        COUNT = ["count", "how many"]
-        PRODUCT = ["product", "multiply"]
-        EVEN = ["even"]
-        ODD = ["odd"]
-        SORT = ["sort", "arrange", "order"]
-        DIFF = ["difference", "subtract", "minus"]
-        SQUARE = ["square"]
-
-        target = nums
-        if has(EVEN):
-            target = even
-        elif has(ODD):
-            target = odd
-
-        if not target:
-            return respond("0")
-
-        # -------- SYMBOL OPERATIONS --------
-        if "+" in q:
-            return respond(sum(nums))
-
-        if "-" in q and len(nums) >= 2:
-            return respond(nums[0] - nums[1])
-
-        if "*" in q:
-            return respond(reduce(operator.mul, nums, 1))
-
-        if "/" in q and len(nums) >= 2 and nums[1] != 0:
-            return respond(nums[0] / nums[1])
-
-        # -------- WORD OPERATIONS --------
-        if has(SUM):
-            return respond(sum(target))
-
-        if has(COUNT):
-            return respond(len(target))
-
-        if has(MAX):
-            return respond(max(target))
-
-        if has(MIN):
-            return respond(min(target))
-
-        if has(AVG):
-            return respond(sum(target) // len(target))
-
-        if has(PRODUCT):
-            return respond(reduce(operator.mul, target, 1))
-
-        if has(DIFF) and len(nums) >= 2:
-            return respond(abs(nums[0] - nums[1]))
-
-        if has(SQUARE):
-            return respond(nums[0] ** 2)
-
-        if has(SORT):
-            return respond(" ".join(map(str, sorted(nums))))
-
-        # -------- FINAL FALLBACK --------
-        return respond(nums[0])
-
-    except:
-        return respond("0")
+    except Exception:
+        return jsonify({
+            "output": "Error"
+        })
 
 
+# -----------------------------
+# RUN
+# -----------------------------
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=5000)
+    app.run(debug=True)
