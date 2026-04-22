@@ -8,15 +8,14 @@ def answer():
     data = request.get_json()
     query = data.get("query", "").lower()
 
-    # Extract numbers
-    numbers = list(map(int, re.findall(r'\d+', query)))
+    # Extract numbers (handles negatives too)
+    numbers = list(map(int, re.findall(r'-?\d+', query)))
 
-    # Only handle addition EXACTLY
-    if ("+" in query or "add" in query) and len(numbers) >= 2:
+    # Detect addition in multiple ways
+    if any(word in query for word in ["+", "add", "sum", "plus"]) and len(numbers) >= 2:
         result = numbers[0] + numbers[1]
         return f"The sum is {result}."
 
-    # Fallback MUST be plain text (not JSON)
     return "I cannot solve this."
 
 if __name__ == '__main__':
