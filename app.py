@@ -13,7 +13,7 @@ def answer():
 
     if "add" in query.lower() or "+" in query:
         result = sum(numbers)
-        return jsonify({"output": f"The sum is {result}."})
+        return f"The sum is {result}."
 
     # fallback
     return jsonify({"output": "I cannot solve this."})
