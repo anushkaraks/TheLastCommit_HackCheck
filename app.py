@@ -12,33 +12,50 @@ def clean(txt):
 def lower(txt):
     return txt.lower().strip()
 
-# 🔥 WORD TO NUMBER MAP
+# 🔥 WORD MAP (extended)
 word_map = {
     "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4,
     "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
     "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13,
     "fourteen": 14, "fifteen": 15, "sixteen": 16,
     "seventeen": 17, "eighteen": 18, "nineteen": 19,
-    "twenty": 20
+    "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50
 }
 
 def extract_numbers(txt):
     nums = []
 
-    # 1. extract digits
+    # 1. digits
     nums += [float(x) for x in re.findall(r'-?\d+\.?\d*', txt)]
 
-    # 2. extract word numbers
+    # 2. word numbers (supports "twenty one")
     words = txt.lower().split()
-    for i, w in enumerate(words):
-        if w in word_map:
-            nums.append(float(word_map[w]))
 
-        # handle negative words
-        if w in ["minus", "negative"] and i + 1 < len(words):
-            nxt = words[i + 1]
-            if nxt in word_map:
-                nums.append(float(-word_map[nxt]))
+    i = 0
+    while i < len(words):
+        w = words[i]
+
+        # negative handling
+        sign = 1
+        if w in ["minus", "negative"]:
+            sign = -1
+            i += 1
+            if i >= len(words):
+                break
+            w = words[i]
+
+        if w in word_map:
+            val = word_map[w]
+
+            # check next word (compound like twenty one)
+            if i + 1 < len(words) and words[i + 1] in word_map:
+                if word_map[w] >= 20:  # like twenty + one
+                    val += word_map[words[i + 1]]
+                    i += 1
+
+            nums.append(float(sign * val))
+
+        i += 1
 
     return nums
 
@@ -59,7 +76,6 @@ def detect_scores(q):
     ]
 
     results = []
-
     for pat in patterns:
         found = re.findall(pat, q)
 
@@ -88,36 +104,33 @@ def solve(query, assets):
 
     lq = lower(q)
 
-    # ======================================
-    # 🚨 LEVEL 7 RULE ENGINE (STRONG)
-    # ======================================
     nums = extract_numbers(q)
 
-    rule_pattern = (
-        ("even" in lq and "double" in lq) and
-        ("odd" in lq and "add" in lq and "10" in lq) and
-        ("20" in lq and ("subtract" in lq or "minus" in lq)) and
-        ("add" in lq and "3" in lq) and
-        ("divisible" in lq and "3" in lq)
-    )
+    # ======================================
+    # 🚨 LEVEL 7 RULE ENGINE (ULTRA STRONG)
+    # ======================================
+    rule_keywords = [
+        "even", "odd", "double", "add 10",
+        "subtract", "minus", "add 3",
+        "divisible", "fizz", "rules"
+    ]
 
-    rule_soft = any(x in lq for x in [
-        "fizz", "apply rules", "rule 1", "rule 2", "rule 3"
-    ])
-
-    if nums and (rule_pattern or rule_soft):
+    if nums and sum(k in lq for k in rule_keywords) >= 3:
         n = int(nums[0])
 
+        # Rule 1
         if n % 2 == 0:
             n = n * 2
         else:
             n = n + 10
 
+        # Rule 2
         if n > 20:
             n = n - 5
         else:
             n = n + 3
 
+        # Rule 3
         if n % 3 == 0:
             return "FIZZ"
         else:
