@@ -1,73 +1,158 @@
 from flask import Flask, request, jsonify
 import re
+from functools import reduce
+import operator
 
 app = Flask(__name__)
-
 
 @app.route('/v1/answer', methods=['POST'])
 def answer():
     try:
-        # -----------------------------------------
-        # REQUIRED INPUT FORMAT
-        # {
-        #   "query": "...",
-        #   "assets": [...]
-        # }
-        # -----------------------------------------
         data = request.get_json(silent=True) or {}
-
-        query = str(data.get("query", "")).strip()
+        query = str(data.get("query", "")).lower()
         assets = data.get("assets", [])
 
-        q = query.lower()
+        clean_query = re.sub(r'[^a-z0-9\s\-\+\*/:]', ' ', query)
 
-        # -----------------------------------------
-        # LEVEL 5 : HIGHEST SCORE PERSON
-        # Example:
-        # Alice scored 80, Bob scored 90.
-        # Who scored highest?
-        # Output: Bob
-        # -----------------------------------------
+        nums = list(map(int, re.findall(r'-?\d+', clean_query)))
 
-        # Extract name-number pairs
-        pairs = re.findall(r'([A-Z][a-zA-Z]*)\s+scored\s+(\d+)', query)
+        # 🔥 ----------- ADVANCED ENTITY EXTRACTION -----------
+        pairs = []
 
-        # fallback generic pair extraction
-        if not pairs:
-            pairs = re.findall(r'([A-Z][a-zA-Z]*)[^0-9]{0,15}(\d+)', query)
+        # Alice scored 80 / Alice got 80 / Alice has 80
+        pairs += re.findall(r'([a-z]+)\s*(?:scored|got|has|had|=)\s*(\d+)', query)
 
+        # Alice: 80
+        pairs += re.findall(r'([a-z]+)\s*[:\-]\s*(\d+)', query)
+
+        # 80 by Alice
+        pairs += re.findall(r'(\d+)\s*(?:by|for)?\s*([a-z]+)', query)
+
+        # Normalize
+        cleaned = []
+        for p in pairs:
+            if p[0].isdigit():
+                score, name = p
+            else:
+                name, score = p
+            cleaned.append((name.capitalize(), int(score)))
+
+        # remove duplicates (keep latest)
+        unique = {}
+        for name, score in cleaned:
+            unique[name] = score
+
+        pairs = list(unique.items())
+        # ----------------------------------------------------
+
+        # 🔥 ----------- ENTITY REASONING -----------
         if pairs:
-            best_name = ""
-            best_score = -1
+            scores = [s for _, s in pairs]
+            max_score = max(scores)
+            min_score = min(scores)
 
-            for name, score in pairs:
-                score = int(score)
+            # highest / top / more / greater
+            if any(w in query for w in ["highest", "max", "top", "more", "greater", "best"]):
+                winners = [n for n, s in pairs if s == max_score]
+                return jsonify({"output": " ".join(winners)})
 
-                if score > best_score:
-                    best_score = score
-                    best_name = name
+            # lowest / least
+            if any(w in query for w in ["lowest", "min", "least", "less"]):
+                losers = [n for n, s in pairs if s == min_score]
+                return jsonify({"output": " ".join(losers)})
 
-            return jsonify({"output": best_name})
+            # generic "who"
+            if "who" in query:
+                winners = [n for n, s in pairs if s == max_score]
+                return jsonify({"output": " ".join(winners)})
 
-        # -----------------------------------------
-        # EXTRA SMART FALLBACK
-        # If names not capitalized
-        # -----------------------------------------
-        names = re.findall(r'[a-zA-Z]+', query)
-        nums = list(map(int, re.findall(r'\d+', query)))
+        # ----------------------------------------------------
 
-        if len(names) >= len(nums) and nums:
-            idx = nums.index(max(nums))
-            if idx < len(names):
-                return jsonify({"output": names[idx].capitalize()})
+        if not nums:
+            return jsonify({"output": "0"})
 
-        # -----------------------------------------
-        # DEFAULT
-        # -----------------------------------------
-        return jsonify({"output": ""})
+        even = [x for x in nums if x % 2 == 0]
+        odd = [x for x in nums if x % 2 != 0]
 
-    except Exception:
-        return jsonify({"output": ""})
+        def has(words):
+            return any(w in query for w in words)
+
+        SUM = ["sum", "add", "total"]
+        AVG = ["average", "mean"]
+        MAX = ["max", "largest", "highest"]
+        MIN = ["min", "smallest", "lowest"]
+        COUNT = ["count", "how many"]
+        PRODUCT = ["product", "multiply"]
+        EVEN = ["even"]
+        ODD = ["odd"]
+        SORT = ["sort", "arrange", "order"]
+        DIFF = ["difference", "subtract"]
+        SQUARE = ["square"]
+        POWER = ["power", "raised"]
+
+        target = nums
+        if has(EVEN):
+            target = even
+        elif has(ODD):
+            target = odd
+
+        if not target:
+            return jsonify({"output": "0"})
+
+        # 🔥 SYMBOL OPS
+        if "+" in query:
+            return jsonify({"output": str(sum(nums))})
+
+        if "-" in query and len(nums) >= 2:
+            return jsonify({"output": str(nums[0] - nums[1])})
+
+        if "*" in query:
+            return jsonify({"output": str(reduce(operator.mul, nums, 1))})
+
+        if "/" in query and len(nums) >= 2 and nums[1] != 0:
+            return jsonify({"output": str(nums[0] // nums[1])})
+
+        # 🔥 POWER
+        if has(POWER) and len(nums) >= 2:
+            return jsonify({"output": str(nums[0] ** nums[1])})
+
+        # 🔥 WORD OPS
+        if has(SUM):
+            return jsonify({"output": str(sum(target))})
+
+        if has(COUNT):
+            return jsonify({"output": str(len(target))})
+
+        if has(MAX):
+            return jsonify({"output": str(max(target))})
+
+        if has(MIN):
+            return jsonify({"output": str(min(target))})
+
+        if has(AVG):
+            return jsonify({"output": str(sum(target)//len(target))})
+
+        if has(PRODUCT):
+            return jsonify({"output": str(reduce(operator.mul, target, 1))})
+
+        if has(DIFF) and len(nums) >= 2:
+            return jsonify({"output": str(abs(nums[0] - nums[1]))})
+
+        if has(SQUARE):
+            return jsonify({"output": str(nums[0] ** 2)})
+
+        if has(SORT):
+            return jsonify({"output": " ".join(map(str, sorted(nums)))})
+
+        # 🔥 SMART FALLBACK (IMPORTANT)
+        # choose best possible guess instead of random
+        if len(nums) == 1:
+            return jsonify({"output": str(nums[0])})
+
+        return jsonify({"output": str(sum(nums))})
+
+    except:
+        return jsonify({"output": "0"})
 
 
 if __name__ == '__main__':
